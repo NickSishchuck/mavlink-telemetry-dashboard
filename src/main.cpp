@@ -3,6 +3,7 @@
 #include <iostream>
 #include <signal.h>
 #include <thread>
+#include <chrono>
 
 // Global objects for signal handling
 TelemetryReader* g_telemetry_reader = nullptr;

@@ -67,4 +67,5 @@ private:
 
     void setupSubscriptions();
     void updateData();
+    std::string flightModeToString(mavsdk::Telemetry::FlightMode mode);
 };

@@ -2,8 +2,10 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <future>
+
 TelemetryReader::TelemetryReader()
-    : _mavsdk(std::make_unique<mavsdk::Mavsdk>(mavsdk::Mavsdk::Configuration{mavsdk::Mavsdk::ComponentType::GroundStation})) {
+    : _mavsdk(std::make_unique<mavsdk::Mavsdk>(mavsdk::Mavsdk::Configuration{mavsdk::ComponentType::GroundStation})) {
 }
 
 TelemetryReader::~TelemetryReader() {
@@ -20,22 +22,14 @@ bool TelemetryReader::connect(const std::string& connection_url) {
 
     std::cout << "Waiting for system to connect..." << std::endl;
 
-    // Wait for system
-    auto prom = std::promise<std::shared_ptr<mavsdk::System>>{};
-    auto fut = prom.get_future();
-
-    _mavsdk->subscribe_on_new_system([&prom](std::shared_ptr<mavsdk::System> system) {
-        if (system->has_autopilot()) {
-            prom.set_value(system);
-        }
-    });
-
-    if (fut.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
+    // Use the modern first_autopilot method instead of subscribe_on_new_system
+    auto system = _mavsdk->first_autopilot(10.0);
+    if (!system) {
         std::cerr << "Timeout waiting for system" << std::endl;
         return false;
     }
 
-    _system = fut.get();
+    _system = system.value();
     _telemetry = std::make_unique<mavsdk::Telemetry>(_system);
 
     // Wait for system to be ready
@@ -117,14 +111,14 @@ void TelemetryReader::setupSubscriptions() {
     _telemetry->subscribe_gps_info([this](mavsdk::Telemetry::GpsInfo gps) {
         std::lock_guard<std::mutex> lock(_data_mutex);
         _current_data.gps_satellites = gps.num_satellites;
-        _current_data.gps_fix_type = gps.fix_type;
+        _current_data.gps_fix_type = static_cast<int>(gps.fix_type);
         updateData();
     });
 
     // Flight mode subscription
     _telemetry->subscribe_flight_mode([this](mavsdk::Telemetry::FlightMode mode) {
         std::lock_guard<std::mutex> lock(_data_mutex);
-        _current_data.flight_mode = mavsdk::Telemetry::flight_mode_str(mode);
+        _current_data.flight_mode = flightModeToString(mode);
         updateData();
     });
 
@@ -134,6 +128,43 @@ void TelemetryReader::setupSubscriptions() {
         _current_data.armed = armed;
         updateData();
     });
+}
+
+std::string TelemetryReader::flightModeToString(mavsdk::Telemetry::FlightMode mode) {
+    switch (mode) {
+        case mavsdk::Telemetry::FlightMode::Unknown:
+            return "Unknown";
+        case mavsdk::Telemetry::FlightMode::Ready:
+            return "Ready";
+        case mavsdk::Telemetry::FlightMode::Takeoff:
+            return "Takeoff";
+        case mavsdk::Telemetry::FlightMode::Hold:
+            return "Hold";
+        case mavsdk::Telemetry::FlightMode::Mission:
+            return "Mission";
+        case mavsdk::Telemetry::FlightMode::ReturnToLaunch:
+            return "Return to Launch";
+        case mavsdk::Telemetry::FlightMode::Land:
+            return "Land";
+        case mavsdk::Telemetry::FlightMode::Offboard:
+            return "Offboard";
+        case mavsdk::Telemetry::FlightMode::FollowMe:
+            return "Follow Me";
+        case mavsdk::Telemetry::FlightMode::Manual:
+            return "Manual";
+        case mavsdk::Telemetry::FlightMode::Altctl:
+            return "Altitude Control";
+        case mavsdk::Telemetry::FlightMode::Posctl:
+            return "Position Control";
+        case mavsdk::Telemetry::FlightMode::Acro:
+            return "Acro";
+        case mavsdk::Telemetry::FlightMode::Stabilized:
+            return "Stabilized";
+        case mavsdk::Telemetry::FlightMode::Rattitude:
+            return "Rattitude";
+        default:
+            return "Unknown";
+    }
 }
 
 void TelemetryReader::updateData() {
