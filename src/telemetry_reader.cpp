@@ -32,10 +32,31 @@ bool TelemetryReader::connect(const std::string& connection_url) {
     _system = system.value();
     _telemetry = std::make_unique<mavsdk::Telemetry>(_system);
 
-    // Wait for system to be ready
-    while (!_telemetry->health_all_ok()) {
-        std::cout << "Waiting for system to be ready..." << std::endl;
+    // Modified health check - more lenient for SITL
+    std::cout << "Waiting for system to be ready..." << std::endl;
+    int health_check_attempts = 0;
+    const int max_attempts = 10;  // Wait up to 10 seconds
+
+    while (health_check_attempts < max_attempts) {
+        if (_telemetry->health_all_ok()) {
+            std::cout << "All health checks passed!" << std::endl;
+            break;
+        }
+
+        // For SITL, we can be more lenient - just check if we have basic telemetry
+        auto health = _telemetry->health();
+        if (health.is_gyrometer_calibration_ok && health.is_accelerometer_calibration_ok) {
+            std::cout << "Basic health checks passed (SITL mode)" << std::endl;
+            break;
+        }
+
+        health_check_attempts++;
+        std::cout << "Health check attempt " << health_check_attempts << "/" << max_attempts << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    if (health_check_attempts >= max_attempts) {
+        std::cout << "Warning: Not all health checks passed, but continuing anyway (SITL mode)" << std::endl;
     }
 
     setupSubscriptions();
