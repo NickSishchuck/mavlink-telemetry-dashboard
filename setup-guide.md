@@ -1,212 +1,52 @@
-# Drone Telemetry Development Setup Guide
 
-## 1. Development Environment Setup
+## Quick Launch Guide
 
-### Initial Setup (one-time)
+### Terminal 1: Start SITL
 ```bash
-# Navigate to ArduPilot directory
+# Activate environment
+source ~/mavlink_stack/mavlink_env/bin/activate
+
+# Navigate and start SITL
 cd ~/ardupilot
+./Tools/autotest/sim_vehicle.py -v ArduCopter --no-mavproxy
+```
+Wait for: "bind port 5760 for 0" and "Serial port 0 on TCP port 5760"
 
-# Activate the Python virtual environment
-source ~/ardupilot-venv/bin/activate
+### Terminal 2: Start MAVProxy
+```bash
+# Activate environment
+source ~/mavlink_stack/mavlink_env/bin/activate
 
-# Verify environment
-which python  # Should show: /home/nick/ardupilot-venv/bin/python
+# Start MAVProxy with dual outputs
+mavproxy.py --master tcp:127.0.0.1:5760 --out udp:127.0.0.1:14550 --out udp:127.0.0.1:14551
+```
+Wait for: Connection confirmation and vehicle data
+
+### Terminal 3: Start Telemetry Dashboard
+```bash
+./telemetry_dashboard udpin://0.0.0.0:14550
 ```
 
-### Daily Development Routine
-```bash
-# 1. Activate virtual environment
-source ~/ardupilot-venv/bin/activate
+### Start QGroundControl
+Type: UDP
+Server adress: 127.0.0.1:14551
 
-# 2. Navigate to ArduPilot
-cd ~/ardupilot
+## Port Configuration Reference
 
-# 3. Build telemetry dashboard (if code changed)
-cd ~/path/to/your/telemetry/project
-make  # or whatever your build command is
+## Port Reference Chart
 
-# 4. Ready to start SITL and test!
-```
+| Port | Component | Direction | Purpose | Protocol |
+|------|-----------|-----------|---------|----------|
+| **5760** | ArduCopter SITL | TCP Server | Primary flight controller connection | TCP |
+| **5762** | ArduCopter SITL | TCP Server | Secondary serial port | TCP |
+| **5763** | ArduCopter SITL | TCP Server | Third serial port | TCP |
+| **14550** | MAVProxy Output | UDP Broadcast | Standard MAVLink telemetry | UDP |
+| **14551** | MAVProxy Output | UDP Broadcast | Secondary telemetry stream | UDP |
+| **5501** | SITL Physics | UDP | Physics simulation data | UDP |
 
-## 2. Port Configuration Reference
-
-| Port | Service | Purpose | Connection Type |
-|------|---------|---------|----------------|
-| **5760** | ArduCopter SITL | Primary flight controller | TCP Server |
-| **5762** | ArduCopter SITL | Secondary serial port | TCP Server |
-| **5763** | ArduCopter SITL | Third serial port | TCP Server |
-| **14550** | MAVProxy Output | Standard MAVLink broadcast | UDP |
-| **14551** | Custom | Alternative UDP port | UDP |
-| **5501** | SITL Physics | Physics simulation | UDP |
 
 ### Connection Directions
 - **tcpout://IP:PORT** = Connect TO a server (client mode) ✅
 - **tcpin://IP:PORT** = Listen for connections (server mode) ❌ conflicts with SITL
 - **udpin://:PORT** = Listen for UDP packets on PORT
 - **udpout://IP:PORT** = Send UDP packets to IP:PORT
-
-## 3. Connection Scenarios
-
-### Scenario A: Direct SITL Connection (Simplest)
-
-**Use when:** Testing telemetry dashboard only, no ground control needed
-
-```bash
-# 1. Start SITL without MAVProxy
-cd ~/ardupilot
-./Tools/autotest/sim_vehicle.py -v ArduCopter --no-mavproxy
-
-# 2. Connect telemetry dashboard directly
-./telemetry_dashboard tcpout://127.0.0.1:5760
-```
-
-**Connections:**
-```
-ArduCopter SITL (5760) ←── telemetry_dashboard
-```
-
-### Scenario B: SITL + QGroundControl (No MAVProxy)
-
-**Use when:** Need manual control + telemetry monitoring
-
-```bash
-# 1. Start SITL without MAVProxy
-cd ~/ardupilot
-./Tools/autotest/sim_vehicle.py -v ArduCopter --no-mavproxy
-
-# 2. Connect telemetry dashboard to primary port
-./telemetry_dashboard tcpout://127.0.0.1:5760
-
-# 3. Connect QGroundControl to secondary port
-# In QGC: TCP connection to 127.0.0.1:5762
-```
-
-**Connections:**
-```
-ArduCopter SITL (5760) ←── telemetry_dashboard
-ArduCopter SITL (5762) ←── QGroundControl
-```
-
-### Scenario C: Full Setup with MAVProxy
-
-**Use when:** Need command-line control + multiple ground stations
-
-```bash
-# 1. Start SITL with MAVProxy
-cd ~/ardupilot
-./Tools/autotest/sim_vehicle.py -v ArduCopter
-
-# 2. Connect telemetry dashboard to MAVProxy UDP output
-./telemetry_dashboard udpin://:14550
-
-# 3. Connect QGroundControl to MAVProxy
-# In QGC: UDP connection to 127.0.0.1:14550
-```
-
-**Connections:**
-```
-ArduCopter SITL (5760) ←── MAVProxy ──→ UDP (14550) ──→ telemetry_dashboard
-                                     ──→ UDP (14550) ──→ QGroundControl
-```
-
-### Scenario D: MAVProxy + Custom UDP Port
-
-**Use when:** Multiple applications need telemetry data
-
-```bash
-# 1. Start SITL without MAVProxy
-cd ~/ardupilot
-./Tools/autotest/sim_vehicle.py -v ArduCopter --no-mavproxy
-
-# 2. Start MAVProxy with custom output
-mavproxy.py --master tcp:127.0.0.1:5760 --out udp:127.0.0.1:14551
-
-# 3. Connect telemetry dashboard to custom port
-./telemetry_dashboard udpin://:14551
-
-# 4. Connect QGroundControl to standard port
-# In QGC: UDP connection to 127.0.0.1:14550
-```
-
-## 4. Troubleshooting
-
-### Common Issues
-
-**"Address already in use" errors:**
-```bash
-# Kill all related processes
-pkill -f sim_vehicle
-pkill -f arducopter
-pkill -f mavproxy
-
-# Wait for ports to be released
-sleep 3
-
-# Verify ports are free
-ss -tulpn | grep -E "(5760|14550)"
-```
-
-**"Connection refused" errors:**
-- Check if SITL is actually running and listening
-- Verify you're using correct connection direction (tcpout vs tcpin)
-- Try different ports (5762, 5763)
-
-**MAVProxy connection issues:**
-- Make sure SITL started successfully first
-- Check for bind port errors in SITL output
-- Try connecting MAVProxy to different SITL ports
-
-### Debug Commands
-```bash
-# Check what's listening on ports
-ss -tulpn | grep -E "(5760|5762|14550)"
-
-# Check active connections
-netstat -an | grep -E "(5760|5762|14550)"
-
-# Find processes using specific ports
-lsof -i :5760
-```
-
-## 5. Quick Reference Commands
-
-### Essential Commands
-```bash
-# Activate environment
-source ~/ardupilot-venv/bin/activate
-
-# Start basic SITL
-cd ~/ardupilot && ./Tools/autotest/sim_vehicle.py -v ArduCopter --no-mavproxy
-
-# Connect dashboard
-./telemetry_dashboard tcpout://127.0.0.1:5760
-
-# Emergency cleanup
-pkill -f sim_vehicle && pkill -f arducopter
-```
-
-### MAVProxy Commands (when connected)
-```bash
-# Arm vehicle
-arm throttle
-
-# Change flight mode
-mode GUIDED
-
-# Takeoff
-takeoff 10
-
-# Land
-land
-
-# Disarm
-disarm
-```
-
-## 6. Recommended Development Workflow
-
-1. **Start with Scenario A** for basic telemetry testing
-2. **Move to Scenario B** when you need to control the vehicle
-3. **Use Scenario C** for advanced multi-client development
-4. **Always verify connections** with `ss -tulpn` before troubleshooting
